@@ -1,0 +1,335 @@
+---
+title: "Analiza przyczyn zmian długości śledzi"
+author: "Paulina Warkocka"
+date: "15 12 2019"
+runtime: shiny
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE)
+library(dplyr)
+library(DT)
+library(mice)
+library(finalfit)
+library(imputeTS)
+library(Hmisc)
+library(reshape)
+library(ggplot2)
+library(plotly)
+library(grid)
+library(ggpubr)
+library(ggcorrplot)
+```
+```{r multiplot function, include=FALSE}
+# Multiple plot function
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  require(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+
+plot_histograms <- function(data, columns=NULL, ncol=1, nrow=1, createName=function(x) x, bins=30){
+  if(is.null(columns)){
+    columns <- names(data)
+  } 
+  
+  i <- 1
+  plots <- list()
+  for (column_name in columns){
+    p <- ggplot(data, aes_string(x = column_name)) + 
+      geom_histogram(color="black", fill="orange", bins=bins) +
+      # geom_density() +
+      ggtitle(createName(column_name)) + 
+      ylab("Liczba obserwacji")
+    plots[[i]] <- p
+    i <- i + 1
+  }
+  figure <- ggarrange(plotlist = plots, ncol = ncol, nrow = nrow)
+  figure
+}
+```
+
+
+## Podsumowanie analizy
+
+## Wykorzystane biblioteki
+
+## Powtarzalność wyników
+Powtarzalność wyników dla operacji losowych zapewnia ustawienie stałego ziarna. 
+
+```{r set_seed}
+set.seed(1)
+```
+
+## Wczytywanie danych z pliku
+
+```{r sledzie}
+fname = "sledzie.csv"
+headset <- read.csv(fname, header = TRUE, nrows = 10)
+# classes <- sapply(headset, class)
+dataset <- read.csv(fname, header = TRUE, na.strings = "?", colClasses = "numeric")
+df <- as.data.frame(dataset)
+df <- df[1:5000,]
+sapply(df, class)
+DT::renderDataTable(df)
+
+```
+
+
+
+## Przetwarzanie brakujących danych 
+Dane w kolumnach są wolnozmienne, dlatego wiersze z brakującymi danymi nie zostaną pominięte, a uzupełnione, gdyż ta operacja na pewno nie wprowadzi do zbioru dużych perturbacji. Do uzupełnienia błędnych wartości użyta zostanie wartość średnia kolumn. Nie jest to najlepsze możliwe rozwiązanie, ale jego znaczną zaletą jest szybkość działania. W tym przypadku średnia jest metodą akceptowalną z uwaki na przypuszczalnie niską wariancję zmiennych. 
+```{r missing_values}
+sapply(df, function(x) sum(is.na(x)))
+sum(complete.cases(df))
+df %>% 
+  missing_plot()
+# impute(df$cfin1, mean)  
+# impute(df$cfin2, mean)  
+# impute(df$chel1, mean) 
+# impute(df$chel2, mean)  
+# impute(df$lcop1, mean)  
+# impute(df$lcop2, mean) 
+# impute(df$sst, mean) 
+
+clean_df <- na_kalman(df)
+
+# init <- mice(df, maxit=0)
+# meth <- init$method
+# predM <- init$predictorMatrix
+# meth[c("length", "fbar", "cumf", "totaln", "sal", "xmonth", "nao")] = ""
+# meth[c("cfin1","cfin2", "chel1", "chel2", "lcop1", "lcop2", "sst")] = "polyreg"
+# imputed <- mice(df, method=meth, predictorMatrix = predM, m=5)
+# imputed <- complete(imputed)
+# sapply(imputed, function(x) sum(is.na(X)))
+
+anyNA(clean_df)
+
+
+```
+
+## Podsumowanie zbioru 
+W pierwszej kolejności przeanalizowane zostaną rozkłady zmiennych. Grafy rozkładów zostały pogrupowane pod kątem zakresu wartości. 
+
+```{r summary}
+df.melted <- melt(clean_df[,!names(clean_df) %in% c("X", "totaln","recr", "fbar", "cumf", "sst", "sal")], id="length")
+# ggplot(df.melted, aes(x = length, y = value, col=variable)) + 
+#   geom_point() +
+#   facet_grid(variable ~ .)
+
+ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+  geom_boxplot(varwidth = T) +
+  labs(title="Rozkład zmiennych",
+               x="Dane",
+               y="Wartości")
+
+# ggplot(df.melted, aes(x = length, y = value, fill=variable, col=variable, )) +
+#   geom_density(stat="identity", alpha=0.2) +
+#   labs(title="Wartości w zależności od długości",
+#                x="Dane")
+ggplot(df.melted, aes(x = length, y = value, col=variable)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="Wartości w zależności od długości",
+               x="Dane")
+
+
+```
+
+
+```{r summary2}
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "totaln","recr")], id="length")
+
+p1 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "fbar","cumf")], id="length")
+p2 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "sst")], id="length")
+p3 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "sal")], id="length")
+p4 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+multiplot(p1, p2, p3, p4, cols=2)
+
+summary(clean_df)
+# plot_histograms(clean_df, createName = function(x) paste0("Histogram - ", names(clean_df)[x]), nrow=1, bins=40)
+# scaleFUN <- function(x) sprintf("%.1f", x)
+number_ticks <- function(n) {function(limits) pretty(limits, n)}
+p <- list()
+for (col in colnames(clean_df[,-1])) {
+  print(col)
+  p[[grep(col, colnames(clean_df))]] <- ggplot(clean_df, aes_string(x = col)) + 
+      geom_histogram(color="black", fill="white", bins=20) +
+      ylab("Liczebność") +
+      scale_x_continuous(breaks=number_ticks(3))
+}
+
+
+multiplot(p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], cols=3)
+multiplot(p[11], p[12], p[13], p[14], p[15], p[16], cols=3)
+
+
+
+```
+
+Możemy zauważyć, że dla większości zmiennych mediana nie byłaby dobrą metodą zastępowania brakujących wartości, gdyż zwykle jest przesunięta ku któremuś z krańców rozkładu. W zbiorze często pojawiają się wartości zmiennych mniejsze lub większe od mediany. W ogólności tylko trzy zmienne (chel2, lcop 2 i sal) mają pojedyncze obserwacje odstające
+
+## Analiza wartości atrybutów
+
+## Korelacje między zmiennymi
+```{r correlation}
+corr <- round(cor(clean_df[,c(-1, -15)]),1)
+corr
+ggcorrplot(corr, hc.order = TRUE,type = "lower",
+   lab = TRUE)
+```
+Wyraźnie najwyższa korelacja występuje pomiędzy dwoma parami zmiennych: 
+- pomiędzy zagęszczeniem widłogonów gatunku 1 (lcop1) a zagęszczeniem planktonu Calanus helgolandicus gatunku 2
+- pomiędzy łacznym rocznym natężeniem połowów w regionie (cumf) a natężeniem połowów w regionie (fbar)
+
+```{r correlation2}
+ggscatter(clean_df, x = "lcop1", y = "chel1", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "lcop1", ylab = "chel1")
+
+ggscatter(clean_df, x = "cumf", y = "fbar", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "cumf", ylab = "fbar")
+```
+Z punktu widzenia zadania najważniejsza jest jednak korelacja ze zmienną length, reprezentującą długość śledzia. Najwyższe współczynniki korelacji osiąga ona w zestawieniu zełączną liczbą ryb złowionych w ramach połowu oraz dostępnością planktonu: lcop1, chel1, cfin1. POnadto ujemna korelacja występuje dla temperatury przy powierzchni wody sst i oscylacji północnoatlantyckiej nao.
+
+ 
+
+
+## Interaktywna prezentacja zmian długości śledzi
+
+Czas w zbiorze danych nie został jawnie podany. Wiadomo jednak, że kolumna xmonth Określa miesiąc, w którym dokonano pomiaru, oraz że dane w tabeli są ustawione chronologicznie latami. Z tego względu możliwe jest obliczenie średniej długości śledzia w danym miesiącu i ukazanie na wykresie długości śledzi na przestrzeni miesięcy. 
+
+
+```{r sum}
+require(data.table)
+dt_monthly <- as.data.table(clean_df)[, mean(length), by=.(xmonth, rleid(xmonth))]
+df_monthly <- as.data.frame(dt_monthly)
+df_monthly[,"year"] <- NA
+
+
+vec <- vector()
+empty_vec <- vector()
+year <- 0
+years <- vector()
+for(i in 1:nrow(df_monthly)) {
+    row <- df_monthly[i,]
+    if(row["xmonth"] %in% vec) {
+      year <- year + 1
+      vec[vec %in% empty_vec]
+    }
+      years <- c(years, year)
+      vec <- c(vec, row["xmonth"])
+}
+
+df_monthly["year"] <- years
+df_monthly <- df_monthly %>% group_by(year)
+
+
+df_monthly <- df_monthly[order(df_monthly$year,df_monthly$xmonth),]
+df_monthly["ID"] <- seq.int(nrow(df_monthly))
+df_monthly
+
+ggplot(df_monthly, aes(ID, V1)) +
+  geom_point() + 
+  geom_smooth() +
+  ggtitle("Wykres zmiany długości śledzia na przestrzeni czasu") +
+  ylab("Długość śledzia") +
+  xlab("Miesiąc pomiarowy")
+
+x <- list(
+  title = "Miesiąc pomiarowy"
+)
+y <- list(
+  title = "Długość śledzia"
+)
+
+plot_ly(data = df_monthly, x = ~ID, y = ~V1,
+            text = ~paste("Length: ", V1), mode="markers")  %>%
+  layout(xaxis = x, yaxis = y )
+```
+
+
+## Regresor przewidujący rozmiar śledzia
+
+## Analiza ważności atrybutów najlepszego modelu regresji
+
+
+
+

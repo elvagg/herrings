@@ -1,0 +1,2 @@
+"0","df.melted <- melt(clean_df, id=""length"")"
+"0","ggplot(df.melted, aes(x = length, y = value, col=variable)) + geom_point()"

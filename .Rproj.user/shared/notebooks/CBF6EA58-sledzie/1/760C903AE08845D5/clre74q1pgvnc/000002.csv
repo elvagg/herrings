@@ -1,0 +1,5 @@
+"0","df.melted <- melt(clean_df, id=""length"")"
+"0","p <- ggplot(df.melted, aes(x = length, y = value, col=variable)) + "
+"0","  geom_point() +"
+"0","  facet_grid(variable ~ .)"
+"0","ggplotly(p, width = 500, height = 200)"

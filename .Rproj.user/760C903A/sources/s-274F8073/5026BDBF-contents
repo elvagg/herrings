@@ -1,0 +1,472 @@
+---
+title: "Analiza przyczyn zmian długości śledzi"
+author: "Paulina Warkocka"
+date: "15 12 2019"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+
+<style type="text/css">
+.main-container {
+  max-width: 1800px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = FALSE)
+library(dplyr)
+library(DT)
+library(finalfit)
+library(reshape)
+library(ggplot2)
+library(imputeTS)
+library(plotly)
+library(grid)
+library(ggpubr)
+library(ggcorrplot)
+library(randomForest)
+library(caret)
+library(e1071)
+library(gridExtra)
+```
+
+```{r multiplotfunction, include=FALSE, message=FALSE, echo= FALSE}
+
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  require(grid)
+  plots <- c(list(...), plotlist)
+  numPlots = length(plots)
+  if (is.null(layout)) {
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    # print(plots[[1]])
+
+  } else {
+    invisible(grid.newpage())
+    invisible(pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout)))))
+
+    for (i in 1:numPlots) {
+      invisible(matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE)))
+      invisible(print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col)))
+    }
+
+  }
+}
+```
+
+
+## Podsumowanie analizy
+Celem raportu było określenie głównych przyczyn stopniowego spadku rozmiaru śledzia oceanicznego wyławianego w Europie na przestrzeni ostatnich lat. 
+Dostarczony zbiór danych zapewniał informacje o następujących parametrach:
+
+  * *length*: długość złowionego śledzia [cm];
+  * *cfin1*: dostępność planktonu [zagęszczenie Calanus finmarchicus gat. 1];
+  * *cfin2*: dostępność planktonu [zagęszczenie Calanus finmarchicus gat. 2];
+  * *chel1*: dostępność planktonu [zagęszczenie Calanus helgolandicus gat. 1];
+  * *chel2*: dostępność planktonu [zagęszczenie Calanus helgolandicus gat. 2];
+  * *lcop1*: dostępność planktonu [zagęszczenie widłonogów gat. 1];
+  * *lcop2*: dostępność planktonu [zagęszczenie widłonogów gat. 2];
+  * *fbar*: natężenie połowów w regionie [ułamek pozostawionego narybku];
+  * *recr*: roczny narybek [liczba śledzi];
+  * *cumf*: łączne roczne natężenie połowów w regionie [ułamek pozostawionego narybku];
+  * *totaln*: łączna liczba ryb złowionych w ramach połowu [liczba śledzi];
+  * *sst*: temperatura przy powierzchni wody [°C];
+  * *sal*: poziom zasolenia wody [Knudsen ppt];
+  * *xmonth*: miesiąc połowu [numer miesiąca];
+  * *nao*: oscylacja północnoatlantycka [mb].
+  
+W ramach połowu jednej jednostki wybierano od 50 do 100 sztuk trzyletnich śledzi. 
+Analiza wykazała, że kluczowe znaczenie dla długości śledzi mają temperatura przy powierzchni wody, natężenie połowów w regionie oraz wzrost oscylacje północnoatlantyckie. Wzrost oscylacji powodował malenie długości śledzia. Zmniejszenie się długości śledzi mogło być też spowodowane niedoborem planktonu gatunków *chel1* i *lcop1*. Zwiększanie natężenia połowów w regionie powodowało zwiększanie długości śledzi - prawdopodobnie dlatego, że zwiększała się ilość pokarmu przypadającego na pozostałe w wodzie jednostki. 
+
+## Wykorzystane biblioteki
+
+Analizy dokonano w środowisku **RStudio** z wykorzystaniem dokumentu **R Markdown** i z użyciem paczki **knitr**. Skorzystano też z następujących bibliotek:
+
+* dplyr
+* DT
+* finalfit
+* reshape
+* ggplot2
+* imputeTS
+* plotly
+* grid
+* ggpubr
+* ggcorrplot
+* randomForest
+* caret
+* e1071
+
+
+## Powtarzalność wyników
+Powtarzalność wyników dla operacji losowych zapewnia ustawienie stałego ziarna. 
+
+```{r setseed}
+set.seed(1)
+```
+
+## Wczytywanie danych z pliku
+Dane wczytane z pliku *sledzie.csv* będą w dalszej kolejnosci przetwarzane w postaci typu **data frame**. Podczas wczytywania zbioru konieczne jest określenie typu danych dla każdej kolumny jako numeryczny. 
+
+```{r readcsv}
+fname = "sledzie.csv"
+headset <- read.csv(fname, header = TRUE, nrows = 10)
+dataset <- read.csv(fname, header = TRUE, na.strings = "?", colClasses = "numeric")
+df <- as.data.frame(dataset)
+sapply(df, class)
+```
+
+Fragment zbioru danych przedstawia się następująco:
+
+```{r datatable}
+head(df)
+```
+
+## Przetwarzanie brakujących danych 
+
+Dane w kolumnach nie zmieniają się z dużą dynamiką, dlatego wiersze z brakującymi informacjami nie zostaną pominięte, a uzupełnione, gdyż ta operacja na pewno nie wprowadzi do zbioru dużych perturbacji. Do uzupełnienia pominiętych wartości użyta zostanie wartość średnia kolumn. Nie jest to najlepsze możliwe rozwiązanie, ale jego znaczną zaletą jest szybkość działania. W tym przypadku średnia jest metodą akceptowalną z uwagi na przypuszczalnie niską wariancję zmiennych. 
+
+```{r missingvaluessummary}
+sapply(df, function(x) sum(is.na(x)))
+sum(complete.cases(df))
+```
+
+Zbiór zawiera 42488 kompletnych przypadków pośród 52582 rekordów. Brakujące wartości występują w kolumnach *cfin1*, *cfin2*, *chel1*, *chel2*, *lcop1*, *lcop2* oraz *sst*, a ich liczba jest do siebie zbliżona. 
+Poniższy wykres prezentuje rozkład brakujących zmiennych.
+
+```{r missingvaluesplot}
+missing_plot(df)
+```
+
+Braki informacji są przypadkowe, często dla danego przypadku brakuje tylko jednej zmiennej. 
+
+```{r missingvaluesprocessing}
+clean_df <- na_mean(df)
+anyNA(clean_df)
+```
+
+Operacja prawidłowo uzupełnia zbiór, nie pozostawiając brakujących wartości.
+
+## Podsumowanie zbioru 
+Zbiór zawiera 52582 rekordy.
+
+Podstawowe statystyki na temat wartości kolumn:
+```{r summary}
+summary(clean_df)
+```
+
+Widzimy, że długość śledzi waha się w przedziale [19.0, 32.5] i ma średnią 25.3 oraz zbliżoną do niej medianę - 25.5. Statystyki dostępności planktonu wykazują mniejszą medianę od średniej (z wyjątkiem planktonu *chel2*). Znaczy to, że w pewnym okresie plankton dostępny był w bardzo dużej ilości, ale przez większość czasu jego ilość była znacznie bardziej ograniczona. Największą różnicę widać w przypadku planktonu *cfin2*. Temperatura przy powierzchni wody (*sst*) oraz zasolenie oceanu (*sal*) prezentują małe wahania wartości, jednak dalsze analiza dowiedzie, że to właśnie te parametry mają krytyczne znacznie dla długości śledzi.
+
+## Analiza wartości atrybutów
+
+W pierwszej kolejności przeanalizowane zostaną rozkłady zmiennych z użyciem wykresów typu **Box plot** i histogramów. Grafy rozkładów zostały pogrupowane pod kątem zakresu wartości. Kod generujący wykresy, z powodu długości, nie zostanie zaprezentowany w raporcie.
+
+```{r summaryplot, echo=FALSE, message=FALSE, warning=FALSE }
+df.melted <- invisible(melt(clean_df[,!names(clean_df) %in% c("X", "totaln","recr", "fbar", "cumf", "sst", "sal")], id="length"))
+
+ggplot(df.melted, aes(x = length, y = value, col=variable)) +
+  geom_point() +
+  geom_smooth() +
+  labs(title="Wartości w zależności od długości",
+       x="Długość śledzia",
+       y="Wartości zmiennych")
+
+```
+
+Na powyższym wykresie możemy zauważyć przede wszystkim, że większe długości śledzi występowały dla większych ilości planktonu *chel1* i *lcop1*. Dla większych długości śledzi malejącą tendencję miały też oscylacje północnoatlantyckie. Wygląda też na to, że miesiąc połowu nie miał prawie żadnego wpływu na długość śledzia. Najmniejszej długości śledzi występowały, gdy dostępność planktonu wszystkich gatunków była minimalna. 
+
+```{r boxplots, echo = FALSE, message=FALSE, warning=FALSE }
+ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+  geom_boxplot(varwidth = T) +
+  labs(title="Rozkład zmiennych",
+               x="Kolumny",
+               y="Wartości")
+
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "totaln","recr")], id="length")
+
+p1 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "fbar","cumf")], id="length")
+p2 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "sst")], id="length")
+p3 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+df.melted <- melt(clean_df[,names(clean_df) %in% c("length", "sal")], id="length")
+p4 <- ggplot(df.melted, aes(x = variable, y = value, col=variable)) +
+      geom_boxplot(varwidth = T) +
+      labs(title="Rozkład zmiennych",
+           x="Dane",
+           y="Wartości")
+
+multiplot(p1, p2, p3, p4, cols=2)
+```
+
+Możemy zauważyć, że dla większości zmiennych mediana nie byłaby dobrą metodą zastępowania brakujących wartości, gdyż zwykle jest przesunięta ku któremuś z krańców rozkładu. W zbiorze często pojawiają się wartości zmiennych mniejsze lub większe od mediany. W ogólności występują pojedyncze obserwacje odstające, co znaczy, że zbiór nie jest w znacznym stopniu zaszumiony. W oceanie dominowała dostępnosć planktonu *lcop2*, który jednocześnie miał największe wahania wartości, ale jego mediana nie była w znacznym stopniu przesunięta ku jednemu z krańców rozkładu. Drugim dominującym źródłem pokarmu był plankton *chel2*. Plankton *lcop1* miał duże rozkłady wartości, ale zwykle było go niewiele - mediana jego jest zbliżona do mediany planktonu *chel1*. 
+
+
+```{r histograms, echo = FALSE, message=FALSE, warning=FALSE, results='hide'}
+number_ticks <- function(n) {function(limits) pretty(limits, n)}
+p <- list()
+for (col in colnames(clean_df[,-1])) {
+  p[[grep(col, colnames(clean_df))]] <- ggplot(clean_df, aes_string(x = col)) + 
+      geom_histogram(color="black", fill="white", bins=20) +
+      ylab("Liczebność") +
+      scale_x_continuous(breaks=number_ticks(3))
+}
+
+multiplot(p[2], p[3], p[4], p[5], p[6], p[7], p[8], p[9], p[10], cols=3)
+multiplot(p[11], p[12], p[13], p[14], p[15], p[16], cols=3)
+```
+
+Na histogramach widać jeszcze wyraźniej, że przez większość czasu dostepność planktonu wszystkich rodzajów była stosunkowo mała w porównaniu do najwyższych zanotowanych wartości. Największy niedobór planktonu został zanotowany dla gatunków *cfin1*, *lcop2* i *lcop1*. Połowów zwykle dokonywano w miesiącach letnich (od lipca do października). Zasolenie w przeważającej mierze utrzymywało się na średniej wartości, jednakże zostały zaobserwowane pewne wahania. 
+
+```{r responsevariable}
+ggplot(clean_df, aes(length)) + geom_density(fill="blue")
+```
+
+Zmienna długości śledzia ma rozkład zbliżony do normalnego, z pewnymi perturbacjami wprowadzającymi nieregularny kształt wykresu gęstości.
+
+## Korelacje między zmiennymi
+
+Sprawdzona zostanie korelacja pomiędzy zmiennymi z wykorzystaniem współczynnika korelacji Pearsona. 
+
+```{r correlation}
+corr <- round(cor(clean_df[,c(-1, -15)]),1)
+ggcorrplot(corr, hc.order = TRUE,type = "lower",
+   lab = TRUE)
+```
+
+Wyraźnie najwyższa korelacja występuje pomiędzy dwoma parami zmiennych: 
+
+* pomiędzy zagęszczeniem widłogonów gatunku 1 (*lcop1*) a zagęszczeniem Calanus helgolandicus gatunku 1 (*chel1*)
+* pomiędzy zagęszczeniem widlogonów gatunku 2 (*lcop2*) a zagęszczeniem Calanus helgolandicus gattunku 2 (*chel2*)
+
+Z punktu widzenia zadania najważniejsza jest jednak korelacja ze zmienną *length*, reprezentującą długość śledzia.Najniższą ujemną korelację ma ona z temperaturą przy powierzchni wody *sst* (-0.4) i oscylacjami północnoatlantyckimy *nao*. (-0.3). Najwyższą dodatnią korelację z długością śledzia obserwujemy dla natężenia połowów w regionie (*fbar*) oraz dla dostępności planktonu *chel1* i *lcop1*. 
+
+```{r correlation2, echo=FALSE, warning=FALSE, message=FALSE}
+p1 <- ggscatter(clean_df, x = "length", y = "chel1", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Długość śledzia", ylab = "chel1")
+
+p2<- ggscatter(clean_df, x = "length", y = "lcop1", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Długość śledzia", ylab = "lcop1")
+
+p3<- ggscatter(clean_df, x = "length", y = "fbar", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Długość śledzia", ylab = "fbare")
+
+p4<- ggscatter(clean_df, x = "length", y = "sst", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Długość śledzia", ylab = "sst")
+
+p5<- ggscatter(clean_df, x = "length", y = "nao", 
+          add = "reg.line", conf.int = TRUE, 
+          cor.coef = TRUE, cor.method = "pearson",
+          xlab = "Długość śledzia", ylab = "nao")
+
+multiplot(p1, p2, p3, p4, p5, cols=2)
+```
+
+
+## Interaktywna prezentacja zmian długości śledzi
+
+Czas w zbiorze danych nie został jawnie podany. Wiadomo jednak, że kolumna *xmonth* określa miesiąc, w którym dokonano pomiaru, oraz że dane w tabeli są ustawione chronologicznie latami. Z tego względu możliwe jest obliczenie średniej długości śledzia w danym miesiącu, uszeregowanie miesięcy w danym roku chronologicznie i ukazanie na wykresie długości śledzi na przestrzeni miesięcy. Oś x reprezentuje kolejne klastry miesięcy, w ktorych dokonywano pomiarów.  
+
+```{r sum, message=FALSE, warning=FALSE}
+require(data.table)
+dt_monthly <- as.data.table(clean_df)[, mean(length), by=.(xmonth, rleid(xmonth))]
+df_monthly <- as.data.frame(dt_monthly)
+df_monthly[,"year"] <- NA
+
+
+vec <- vector()
+empty_vec <- vector()
+year <- 0
+years <- vector()
+for(i in 1:nrow(df_monthly)) {
+    row <- df_monthly[i,]
+    if(row["xmonth"] %in% vec) {
+      year <- year + 1
+      vec[vec %in% empty_vec]
+    }
+      years <- c(years, year)
+      vec <- c(vec, row["xmonth"])
+}
+
+df_monthly["year"] <- years
+df_monthly <- df_monthly %>% group_by(year)
+
+
+df_monthly <- df_monthly[order(df_monthly$year,df_monthly$xmonth),]
+df_monthly["ID"] <- seq.int(nrow(df_monthly))
+df_monthly
+
+ggplot(df_monthly, aes(ID, V1)) +
+  geom_point() + 
+  geom_smooth() +
+  ggtitle("Wykres zmiany długości śledzia na przestrzeni czasu") +
+  ylab("Długość śledzia") +
+  xlab("Miesiąc pomiarowy")
+```
+
+Wyraźnie widzimy, że początkowo długość śledzi wzrastała, aż do osiągnięcia maksymalnej wartości, a następnie przez większość lat konsekwencje malała. 
+
+Szczegółowo długość śledzia można przeanalizować na wykresie interaktywnym wygenerowanym z użyciem **Plotly**:
+```{r interactiveplot, echo=FALSE, message=FALSE, warning=FALSE}
+x <- list(
+  title = "Miesiąc pomiarowy"
+)
+y <- list(
+  title = "Długość śledzia"
+)
+
+plot_ly(data = df_monthly, x = ~ID, y = ~V1,
+            text = ~paste("Length: ", V1), mode="markers")  %>%
+  layout(xaxis = x, yaxis = y )
+```
+
+## Regresor przewidujący rozmiar śledzia
+
+W pierwszej kolejności zbiór danych zostanie podzielony na zbiór uczący, zawierający 80% wszystkich przykładów, oraz zbiór testowy, zawierający 20% rekordów. Dane nie zostały znormalizowane, gdyż normalizacja powodowała pogorszenie miar oceny **RMSE** i **R^2^**
+
+```{r datadivision}
+row.number <- sample(1:nrow(clean_df[,-1]), 0.8*nrow(clean_df[,-1]))
+train = clean_df[row.number,-1]
+test = clean_df[-row.number,-1]
+dim(train)
+dim(test)
+```
+
+Funkcja wykorzystywana do ewaluacji modelI
+
+```{r evaluation}
+test_model <- function(model, test) {
+  r_squared <- function (x, y) cor(x, y) ^ 2
+
+  pred <- predict(model, newdata = test)
+  rmse <- RMSE(pred, test$length)
+  r_2 <- r_squared(pred, test$length)
+  c(RMSE = rmse, R2=r_2)
+}
+```
+
+Przetestowane zostaną trzy regresory: 
+
+* regresja liniowa ze wzmocnieniem kwadratowym, 
+* algorytm Random Forest,
+* regresor z wykorzystaniem algorytmu K najbliższych sąsiadów. 
+
+### Regresja liniowa
+
+```{r regression}
+model1 = lm(length ~., data=train)
+summary(model1)
+```
+
+Model ten ma niski współczynnik determinacji **R^2^**, co znaczy, że nie jest dobrym modelem, zostanie więc podjęta próba wzmocnienia regresora poprzez podniesienie zmiennych do kwadratu. 
+
+```{r linearregression2}
+model2 = lm(log(length)~cfin1+cfin2+chel1+chel2+lcop1+lcop2+fbar+recr+
+cumf+totaln+sst+sal+nao+xmonth+ I(cfin1^2)+ I(cfin2^2)+I(chel1^2)+ I(chel2^2)+ I(lcop1^2)+ 
+I(lcop2^2)+ I(fbar^2)+ I(recr^2)+ I(cumf^2)+ I(totaln^2 + I(sst^2)+I(sal^2)+I(nao^2)+I(xmonth^2)), data=train)
+summary(model2)
+```
+
+Dopasowanie zwiększyło się, ale nadal nie jest zadowalajace. Ponadto w zbiorze znajduje się wiele zmiennych o wysokich wartościach P-Value, jednak nie zostaną one usunięte, ponieważ nie przynosi to poprawy wyniku. 
+Podjęta zostanie jednak próba zwalidowania modelu na zbiorze testowym w celu późniejszego porównania z innymi modelami:
+
+```{r lmvalidation, warning=FALSE}
+pred1 <- predict(model2, newdata = test)
+rmse <- sqrt(sum((exp(pred1) - test$length)^2)/length(test$length))
+c(RMSE = rmse, R2=summary(model2)$r.squared)
+```
+
+Błąd średniokwadratorwy zwrócony przez predyktor jest znaczny w porównaniu z przedziałem wartości, jakie osiagała historycznie długość śledzia.
+
+### Random forest
+
+```{r randomforest}
+
+trControl <- trainControl(method = "cv",
+    number = 10,
+    search = "grid")
+
+
+rf_default <- train(length~.,
+    data = train,
+    method = "rf",
+    preProc = c("center", "scale"),
+    ntree=10,
+    importance = TRUE,
+    metric = "RMSE",
+    trControl = trControl)
+
+print(rf_default)
+
+test_model(rf_default, test)
+
+```
+
+Algorytm Random Forest osiąga trochę lepsze wyniki, jednak nadal są one dalekie od dobrego dopasowania. 
+
+### K najbliższych sąsiadów
+```{r knn}
+knn_model <- train(
+  length ~., data = train, method = "knn",
+  trControl = trainControl("cv", number = 10),
+  preProcess = c("center","scale"),
+  tuneLength = 20
+  )
+
+plot(knn_model)
+
+```
+
+Najlepszy wynik osiągnięto dla następującej liczby najlepszych sąsiadów:
+```{r knn neighbors}
+knn_model$bestTune
+```
+
+Wynik ewaluacji na zbiorze testowym:
+
+```{r knn test}
+test_model(knn_model, test)
+```
+
+Wynik jest lepszy od tych uzyskanych przy użyciu poprzednich regresorów - random forest i regresji liniowej. 
+
+## Analiza ważności atrybutów najlepszego modelu regresji
+
+Widzimy wyraźnie, że dla algorytmu K najbliższych sąsiadów największe znaczenie miała wartość temperatury przy powierzchni wody. Duże znaczenie miały też oscylacje północnoatlantyckie, natężenie połowów w regionie oraz dostępność planktonu *lcop1* i *chel1*.
+
+```{r analysis}
+ggplot(varImp(knn_model))
+```
+
+ 
+

@@ -1,0 +1,27 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1576867761591.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "5026BDBF",
+    "lastKnownWriteTime" : 1577014402,
+    "last_content_update" : 1577014402624,
+    "path" : "E:/STUDIA/ITI/Semestr_2/Eksploracja masywnych danych/Projekt 1/sledzie.Rmd",
+    "project_path" : "sledzie.Rmd",
+    "properties" : {
+        "cursorPosition" : "125,23",
+        "last_setup_crc32" : "",
+        "scrollLine" : "116",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_markdown"
+}

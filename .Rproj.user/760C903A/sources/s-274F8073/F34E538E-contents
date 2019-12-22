@@ -1,0 +1,353 @@
+---
+title: "Eksploracja Masywnych Danych - projekt 1 - Analiza danych"
+author: "Katarzyna Jóźwiak 127237, Piotr Pawlaczyk 127245"
+always_allow_html: true
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  md_document:
+    toc: true
+    variant: markdown_github
+---
+data wygenerowania: '`r format(Sys.Date(), "%Y-%B-%d")`'
+
+# Podsumowanie badań
+Celem niniejszego projektu było określenie jakie mogą być główne przyczyny stopniowego zmniejszania się długości śledzi oceanicznych wyławianych w Europie. Aby przeprowadzić badania i odpowiedzieć na zadane pytania przeanalizowano dane m. in. poprzez analizę korelacji atrybutów i wyznaczenie który atrybut jest najbardziej skorelowany z długością śledzia. Oprócz tego stworzono 3 klasyfikatory i na podstawie najlepszego z nich oceniono która z cech łowisk miała największe znaczenie przy przewidywaniu poszczególnych klas długości badanej ryby.
+
+# Wykorzystane biblioteki
+Do analizy danych i stworzenia raportu zostały wykorzystane następujące biblioteki:   
+- datasets    
+- corrplot  
+- ggplot2  
+- plotly  
+- dplyr  
+- gridExtra  
+- gifski package  
+- imputeTS   
+- caret
+
+
+# Zapewnienie powtarzalności wyników przy każdym uruchomieniu raportu na tych samych danych
+Aby zapewnić powtarzalność próbkowań i losowań liczb (m. in. przy próbkowaniu zbioru) przy każdym odpaleniu programu ustawiono stałe ziarno.  
+```{r}
+set.seed(23)
+```
+
+# Wstęp
+W podanym sprawozdaniu użyto zbioru danych sledzie.csv pobranego ze strony http://www.cs.put.poznan.pl/alabijak/emd/projekt/sledzie.csv . 
+Zbiór ten opisuje rozmiary śledzi i warunki, w których żyją od 60-ciu lat. Kolejne kolumny w zbiorze danych to:  
+- **length**: długość złowionego śledzia [cm];  
+- **cfin1**: dostępność planktonu [zagęszczenie Calanus finmarchicus gat. 1];  
+- **cfin2**: dostępność planktonu [zagęszczenie Calanus finmarchicus gat. 2];  
+- **chel1**: dostępność planktonu [zagęszczenie Calanus helgolandicus gat. 1];  
+- **chel2**: dostępność planktonu [zagęszczenie Calanus helgolandicus gat. 2];  
+- **lcop1**: dostępność planktonu [zagęszczenie widłonogów gat. 1];  
+- **lcop2**: dostępność planktonu [zagęszczenie widłonogów gat. 2];  
+- **fbar**: natężenie połowów w regionie [ułamek pozostawionego narybku];  
+- **recr**: roczny narybek [liczba śledzi];  
+- **cumf**: łączne roczne natężenie połowów w regionie [ułamek pozostawionego narybku];  
+- **totaln**: łączna liczba ryb złowionych w ramach połowu [liczba śledzi];  
+- **sst**: temperatura przy powierzchni wody [°C];  
+- **sal**: poziom zasolenia wody [Knudsen ppt];  
+- **xmonth**: miesiąc połowu [numer miesiąca];  
+- **nao**: oscylacja północnoatlantycka [mb].  
+Wiersze w zbiorze są uporządkowane chronologicznie.
+
+# Wczytywanie danych z pliku
+```{r}
+names <- read.table("sledzie.csv", nrow=1, stringsAsFactors = FALSE, sep = ",")
+data <- read.table("sledzie.csv", header=TRUE, stringsAsFactors = FALSE, sep=",")
+head(data)
+```
+Jak widać, wczytane dane zawierają znak "?" przy nieznanych danych.
+
+Poniżej wyświetlono klasy poszczególnych kolumn:
+```{r}
+sapply(data, class)
+```
+Krotki zawierające znak "?" zostały zinterpretowane jako tekst.  
+Z uwagi na występowanie brakujących danych konieczna była zmiana "?" na "NA" wraz ze zmianą typu danych z "character" na "numeric":
+```{r}
+data[data=="?"] <- NA
+```
+Po zmianie "?" na wartość NA zmieniono typ danych kolumn z nieznanymi wartościami na wartości numeryczne.  
+```{r}
+data$cfin1 <- as.numeric(data$cfin1)
+data$cfin2 <- as.numeric(data$cfin2)
+data$chel1 <- as.numeric(data$chel1)
+data$chel2 <- as.numeric(data$chel2)
+data$lcop1 <- as.numeric(data$lcop1)
+data$lcop2 <- as.numeric(data$lcop2)
+data$sst <- as.numeric(data$sst)
+
+head(data)
+sapply(data, class)
+
+```
+
+# Rozmiar zbioru danych i podstawowe statystyki
+```{r}
+paste("Wczytane dane zawierają", nrow(data), "rekordów oraz", ncol(data), "kolumn.", sep=" ")
+```
+
+Podsumowanie wartości danych:
+```{r}
+summary(data)
+```
+
+Ilość brakujących danych dla poszczególnych kolumn:
+```{r}
+missingData <- sapply(data, function(x) sum(is.na(x)))
+missingData
+```
+Wykres ilości brakujących danych w zbiorze:
+
+```{r}
+plot(x = factor(names(missingData)), y = missingData, main="Wykres ilości brakujących danych w zbiorze", xlab="atrybut", ylab = "ilość brakujących artybutów")
+```  
+
+Jak widać, analizowany zbiór zawiera znaczną ilość brakujących danych, co może utrudnić ich późniejsze badanie.
+
+# Brakujące dane
+```{r warning = FALSE, message = FALSE}
+library("imputeTS")
+data$cfin1 <- na_kalman(data$cfin1)
+data$cfin2 <- na_kalman(data$cfin2)
+data$chel1 <- na_kalman(data$chel1)
+data$chel2 <- na_kalman(data$chel2)
+data$lcop1 <- na_kalman(data$lcop1)
+data$lcop2 <- na_kalman(data$lcop2)
+data$sst <- na_kalman(data$sst)
+```
+
+Ilość brakujących danych w poszczególnych kolumnach po zastosowaniu filtru Kalman'a:
+
+```{r}
+missingData <- sapply(data, function(x) sum(is.na(x)))
+missingData
+```
+
+Z powyższej tabeli wynika, że filtr Kalman'a poradził sobie ze wszystkimi brakującymi danymi.
+
+
+# Szczegółowa analiza zbiorów wartości
+Poniżej przedstawiono rozkłady wszystkich wartości w zbiorze danych.  
+
+```{r message=FALSE, warning=FALSE}
+library(ggplot2)
+library(ggExtra)
+
+lengthDissPlot <- ggplot(data, aes(x=length)) + geom_histogram(binwidth=.5, colour="black", fill="white")
+cfin1DissPlot <- ggplot(data, aes(x=cfin1)) + geom_histogram(binwidth=1, colour="black", fill="white")
+cfin2DissPlot <- ggplot(data, aes(x=cfin2)) + geom_histogram(binwidth=1, colour="black", fill="white")
+chel1DissPlot <- ggplot(data, aes(x=chel1)) + geom_histogram(binwidth=2, colour="black", fill="white")
+chel2DissPlot <- ggplot(data, aes(x=chel2)) + geom_histogram(binwidth=2, colour="black", fill="white")
+lcop1DissPlot <- ggplot(data, aes(x=lcop1)) + geom_histogram(binwidth=5, colour="black", fill="white")
+lcop2DissPlot <- ggplot(data, aes(x=lcop2)) + geom_histogram(binwidth=3, colour="black", fill="white")
+fbarDissPlot <- ggplot(data, aes(x=fbar)) + geom_histogram(binwidth=.05, colour="black", fill="white")
+recrDissPlot <- ggplot(data, aes(x=recr)) + geom_histogram(binwidth=75000.0, colour="black", fill="white")
+cumfDissPlot <- ggplot(data, aes(x=cumf)) + geom_histogram(binwidth=.02, colour="black", fill="white")
+totalnDissPlot <- ggplot(data, aes(x=totaln)) + geom_histogram(binwidth=20000.0, colour="black", fill="white")
+sstDissPlot <- ggplot(data, aes(x=sst)) + geom_histogram(binwidth=.2, colour="black", fill="white")
+salDissPlot <- ggplot(data, aes(x=sal)) + geom_histogram(binwidth=.01, colour="black", fill="white")
+xmonthDissPlot <- ggplot(data, aes(x=xmonth)) + geom_histogram(binwidth=1.0, colour="black", fill="white")
+naoDissPlot <- ggplot(data, aes(x=nao)) + geom_histogram(binwidth=.5, colour="black", fill="white")
+
+
+require(gridExtra)
+grid.arrange(lengthDissPlot,cfin1DissPlot,cfin2DissPlot ,chel1DissPlot ,chel2DissPlot,lcop1DissPlot,lcop2DissPlot ,fbarDissPlot ,
+recrDissPlot ,cumfDissPlot ,totalnDissPlot ,sstDissPlot ,salDissPlot ,xmonthDissPlot ,naoDissPlot, nrow = 5, ncol=3)
+```
+
+Z powyższych wykresów wynika, że pod względem rozkładu poszczególnych atrybutów zbiór nie jest zrównoważony.    
+
+Analizując długość śledzia (*length*) można zauważyć, że ten atrybut przyjmuje rozkład zbliżony do rozkładu normalnego. W zbiorze danych znajduje się najwięcej ryb o długości równej 25-26 cm. Ze wcześniejszej analizy podsumowującej dane wynika także, że minimalna długość śledzia w zbiorze to 19 cm, a maksymalna to 32.5 cm. Średnia długość 25.3 cm, a mediana to 25.5.      
+
+W zakresie atrybutu jakim jest dostępność planktonu (zarówno zagęszczenie *Calanus finmarchicus gat. 1* jak i *Calanus finmarchicus gat. 2*) można zauważyć, że w zbiorze znalazło się znacznie więcej danych z łowisk o mniejszej dostępności planktonu omawianego gatunku. Wcześniej przeprowadzone badania wskazują, że minimalna dostępność pierwszego gatunku tego planktonu to 0, maksymalna: ok. 37.67. Średnia wyniosła ok. 0,45 a mediana to ok. 0.11. Jeśli chodzi o drugi gatunek *Calanus finmarchicus* to jego minimalne zagęszczenie wynosi 0, maksymalne - ok. 19.4, średnia to ok. 2.03 a mediana - 0.7.    
+
+Kolejnym badanym atrybutem jest dostępność planktonu gatunku *Calanus helgolandicus gat. 1* i *Calanus helgolandicus gat. 2*. W przypadku pierwszego z nich w zbiorze znalazło się więcej śledzi złowionych na łowisku o mniejszej zawartości planktonu. Co do drugiego gatunku planktonu rozkład ilości złowionych tam śledzi był bardziej rozłożony w przedziale 0-40. O rybach złapanych w miejscach, gdzie zagęszczenie omawianego planktonu drugiego gatunku osiąga przedział 40-60 można powiedzieć, że są to wartości odstające. Odnośnie zagęszczenia pierwszego gatunku to z poprzedzających wyliczeń wynika, że atrybut ten przyjmuje minimalną wartość równą 0, a maksymalną równą 75. Jego średnia występowania to ok. 10, a mediana to 5.75. W odniesieniu do minimalej wartość dostępności planktonu drugiego gatunku *Calanus helgolandicus* to jego minimalna wartość to ok. 5.2, maksymalna: ok. 57.7, średnia to ok. 21.2, a mediana wynosi około 21.7.   
+
+Ostatnim z planktonów, których dostępność badaliśmy, są widłonogi dwóch gatunków (*lcop1* i *lcop2*). Na temat pierwszego  z nich można powiedzieć, że zdecydowanie więcej śledzi wyłowiono na łowisku o dostępności widłonogów mniejszej niż 30. W odniesieniu do drugiego  gatunku, to największa ilości połowów znajduje się w przedziale 10-45. Ze wcześniejszych badań wiemy, że minimalna wartość *lcop1* wynosi 0.3, a maksymalna 115.6, średnia zaś 12.8 i mediana 7. Jeśli chodzi o drugi gatunek widłonogów, to ich minimalna wartość wynosi 7.8, maksymalna 68,7, średnia ok. 28, a mediana: 24.8.   
+
+Kolejnym atrybutem jest natężenie połowów w regionie (ułamek pozostawionego narybku) - *fbar*. Rozkład tego atrybutu jest zbliżony do rozkładu normalnego. Z tabeli umieszczonej we wcześniejszej części badań wynika, że minimalna wartość, jaką przyjmuje ten atrybut to ok. 0.07, maksymalna ok. 0.85, a średnia i mediana to ok. 0.33.   
+
+Następnym z badanych atrybutów jest ilość rocznego narybku, czyli liczba śledzi - *recr*. Z powyższego wykresu wynika, że większość atrybutów w zbiorze przyjmuje małe wartości, a im wyższa liczba śledzi, tym mniejsza próbka danych w analizowanym zbiorze, Po przeanalizowaniu badań można stwierdzić, że minimalna wartość atrybutu *recr* wynosi ok. 140tys, maksymalna 1.5mln, średnia ok. 520tys., a mediana ok. 421 000.  
+
+Rozkład atrybutu *cumf*, czyli łączne roczne natężenie połowów w regionie, (ułamek pozostawionego narybku), jest niemalże równomierny. Tylko dla niektórych wartości próbka danych w zbiorze jest niższa. Minimalna wartość, jaką przyjmuje ten atrybut to ok. 0.07, maksymalna: ok. 0.4 a średnia i mediana - ok. 0.23.   
+
+Z wykresu zawierającego rozkład wartości atrybutu *totaln*, czyli łącznej liczby ryb złowionych w ramach połowu (liczbę śledzi) wynika, że liczba łowionych ryb była nierównomierna. Można zauważyć tylko, że bardzo dużą liczbę przykładów pokrywają połowy, w trakcie których złowiono ok. 750 tys. śledzi. Ze wcześniejszych analiz wynika, że minimalna liczba śledzi złowionych w trakcie połowu to ok. 144 tysiące, maksymalna - ok 1 milion, średnia - ok. 514 tys., a mediana to ok. 540 tys.  
+
+Kolejną analizowaną cechą jest *sst*  - temperatura przy powierzchni wody [°C]. Z wykresu można zauważyć, że najwięcej przykładów ze zbioru danych przyjmuje wartość tego atrybutu z przedziału 13.5 - 14.5. Minimalna wartość *sst* wynosi 12.77, maksymalna: 14.73, średnia 13.87, a mediana 13.86.   
+
+W zakresie atrybutu  *sal*: poziom zasolenia wody [Knudsen ppt] zdecydowana większość przypadków przyjmowała jego wartość w przedziale 35.50 - 35.55. Minimalna wartość tego atrybutu wyniosła 35.40, maksymalna: 35.61 a mediana i średnia: 35.51.     
+
+Następnym z atrybutów, które poddaliśmy analizie jest *xmonth*, czyli miesiąc połowu (numer miesiąca). Rozkład tego atrybutu jest zbliżony do rozkładu normalnego. Najmniej połowów miało miejsce w styczniu, a najwięcej w sierpniu. Ponieważ *xmonth* wskazuje na numer miesiąca, obliczanie dla niego wartości minimalnej i maksymalnej, a także podawanie średniej i mediany nie ma sensu.     
+
+Ostatnim z badanych parametrów łowisk jest *nao*: oscylacja północnoatlantycka [mb]. Rozkład tego atrybutu jest nierównomierny. Jego minimalna wartość to -4.89, maksymalna to 5.08, średnia wynosi -0.09, a mediana 0.2.    
+
+
+# Korelacja między zmiennymi
+
+W niniejszej sekcji zostało przeanalizowane wzajemne powiązanie między atrybutami. Na początek przedstawiono współczynniki korelacji wraz z graficzną macierzą korelacji.  
+
+```{r cache=TRUE, warning = FALSE, message = FALSE}
+res <- cor(data)
+
+library(corrplot)
+corrplot.mixed(res, tl.col = "black", tl.srt = 45)
+```
+
+Największa korelacja występuje między atrybutem *chel1* i *lcop1* - czyli między dostępnością planktonu dwóch gatunków i wynosi ona 0.96. Między *chel2* i *lcop2* - współczynnik korelacji wynosi 0.89, a między *cumf* ( łączne roczne natężenie połowów w regionie) a *fbar* (natężenie połowów w regionie): 0.82 (zależność między tymi ostatnimi wynika prawdopodobnie z tego, że na podstawie jednego z tych atrybutów w naturalny sposób oblicza się drugi z nich). Wysoka korelacja występuje także między *cfin2* a *lcop2*, gdzie jej współczynnik jest równy 0.65.    
+
+Bardzo niski, jednak ujemny współczynnik korelacji (wynoszący -0.55) miedzy atrybutem *lcop1* a *neo* (oscylacja północnoatlantycka) świadczy o wysokiej, ale odwrotnej zależności tych atrybutów. Może to być wyjaśnione z punktu widzenia przyrody przez to, że plankton może być przenoszony przez prądy morskie.  
+
+Niski ujemny współczynnik korelacji wskazujący na wysoką zależność atrybutów można też zauważyć między *cumf* (łączne roczne natężenie połowów w regionie), a *totaln* (łączna liczba ryb złowionych w ramach połowu) - wynosi on -0.71, gdzie taka zależność też jest naturalna.    
+
+W zakresie atrybutu, którego będą dotyczyć badania w dalszej części pracy, czyli długość śledzia, to jest najbardziej skorelowana z temperaturą przy powierzchni wody, a współczynnik tej korelacji wynosi -0.45 (czyli są to wartości odwrotnie zależne)
+
+
+Żeby lepiej zwizualizować korelacje między omówionymi atrybutami przedstawiono wykresy zależności tych atrybutów.
+
+```{r cache=TRUE}
+plot(data[,c(5,7,16)])
+```
+
+W przypadku zaprezentowanych powyżej danych, zgodnie z wartościami mieszczącymi się w macierzy korelacji, największe powiązanie (współczynnik korelacji wynoszący 0.96) widać między dostępnością planktonu pierwszego gatunku Calanus helgolandicus (*chel1*), a zagęszczeniem widłonogów z gatunku pierwszego (*lcop2*). Z wykresu wynika, że im więcej jednego planktonu w łowisku, tym spotkać tam można więcej drugiego z wymienionych planktonów.   
+Zależność między *lcop2* a  oscylacja północnoatlantycka  *neo* nie jest aż tak widoczna na wykresie (choć też da się ją zauważyć).   
+
+
+```{r cache=TRUE}
+plot(data[,c(6,8,4)])
+```
+
+Podobnie jak na poprzednim wykresie, i tu najbardziej widoczna jest korelacja między dostępnością dwóch z gatunków planktonu.
+
+```{r cache=TRUE}
+plot(data[,c(9,11,12)])
+```
+
+Na powyższym wykresie korelacji najbardziej widać odwrotnie proporcjonalną zależność między *fbar* a *totaln* - współczynnik korelacji wynoszący -0.71) i *cumf* a *totaln*. Można wyraźnie zauważyć, że im więcej pierwszego z atrybutów, tym mniej drugiego i odwrotnie.  
+Wysoce proporcjonalne są zmienne *fbar* i *cumf*.
+
+
+# Zmiana rozmiaru śledzia w czasie
+
+```{r, warning = FALSE, message = FALSE}
+library(ggplot2)
+library(dplyr)
+library(plotly)
+
+sampled <- sample_n(data,  round(nrow(data)*0.1))
+
+p <- ggplot(
+  sampled, aes(X, length)) +
+  geom_line()  +
+  geom_smooth(method = "loess", formula = y ~ x, se = FALSE, colour = "#0000ff", size = 1)+
+  labs(x = "Kolejne połowy", y = "Długość śledzia")
+
+
+ggplotly(p)
+```
+
+Z wykresu można zauważyć delikatny spadek długości śledzia w czasie. Choć na początku rozmiar ryby znaczie rośnie, to po którkim czasie zaczyna już maleć.
+
+# Przewidywanie rozmiaru śledzia
+W niniejszym rozdziale postaramy się przewidzieć rozmiar śledzia z wykorzystaniem różnych metod uczenia maszynowego. W tym celu na początek dane zostaną podzielone na zbiór uczący (stanowiący 75% całego zbioru) i testowy (stanowiący 25% całego zbioru). 
+
+Pierwszą rzaczą było usunięcie parametru X z danych.  
+```{r}
+data <- data[, !(colnames(data) %in% c("X"))]
+```
+
+Do badań zostanie wykorzystana powtarzana ocena krzyżowa.
+```{r warning = FALSE, message = FALSE}
+library(caret)
+library(ggplot2)
+library(gganimate)
+library(dplyr)
+
+inTraining <- createDataPartition(y = data$length, p = .75,list = FALSE)
+
+training <- data[ inTraining, ]
+testing  <- data[-inTraining, ]
+
+availableValues <- sapply(testing$length, round, digits = 0)
+
+ctrl <- trainControl( method = "repeatedcv", number = 5, repeats = 10)
+```
+
+
+## Random Forest
+Pierwszym z wykorzystanych algorytmów będzie Random Forest z liczbą drzew w lesie równą 10.
+
+```{r cache=TRUE}
+fitRandomForestF <- train(length ~ ., data = training, method = "rf", importance=T, trControl = ctrl, ntree = 10) 
+
+rfClasses <- predict(fitRandomForestF, newdata = testing)
+rfClasses <- sapply(rfClasses, round, digits = 0)
+
+levels <- unique(c(availableValues, rfClasses))
+```
+
+```{r}
+postResample(pred = rfClasses, obs = availableValues)
+```
+
+
+## Regresja liniowa
+Kolejnym przebadanym regresorem będzie regresja liniowa. 
+
+```{r cache=TRUE, warning = FALSE}
+fitLR <- train(length ~ ., data = training, method = "lm", importance=T, trControl = ctrl)
+
+lrClasses <- predict(fitLR, newdata = testing)
+lrClasses <- sapply(lrClasses, round, digits = 0)
+
+levels <- unique(c(availableValues, lrClasses))
+```
+
+```{r}
+postResample(pred = lrClasses, obs = availableValues)
+```
+
+
+## kNN
+Ostatnim z przebadanych algorytmów został kNN  
+```{r cache=TRUE, warning = FALSE}
+fitKNN <- train(length ~ ., data = training, method = "knn", importance=T, trControl = ctrl)
+
+knnClasses <- predict(fitKNN, newdata = testing)
+knnClasses <- sapply(knnClasses, round, digits = 0)
+
+levels <- unique(c(availableValues, knnClasses))
+```
+
+```{r}
+postResample(pred = knnClasses, obs = availableValues)
+plot(fitKNN)
+```
+  
+Z wykresu wynika, że algorytm osiąga najlepsze wyniki (czyli najmniejszą miarę RMSE) dla k=5.
+
+## Porównanie modeli
+Na koniec modele zostały porównane na podstawie miary średniej kwadratowej błędów RMSE (w przypadku tej miary, im mniejszą wartość osiągnie algorytm, tym jest lepszy) i współczynnik determinacji R^2^ (dopasowanie modelu jest tym lepsze im wartość R^2^ jest bliższa jedności):  
+
+```{r}
+x <- list(randomForest = fitRandomForestF, linearRegression = fitLR, kNN = fitKNN) %>% resamples()
+
+dotplot(x, metric = "RMSE")
+dotplot(x, metric = "Rsquared")
+```
+  
+Z powyższych wykresów wynika, że w przypadku porównywania algorytmu obiema miarami najlepiej poradził sobie algorytm kNN.  
+
+# Analiza ważności atrybutów najlepszego znalezionego modelu regresji  
+Najlepszym znalezionym modelem regresji okazał się być algorytm kNN, dla którego przeanalizowaliśmy ważność atrybutów:
+
+```{r}
+ggplot(varImp(fitKNN))
+```
+
+
+  Z powyższego wykresu wynika, że największy wpływ na długość śledzia miał atrybut *sst* czyli temperatura przy powierzchni wody.

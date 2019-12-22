@@ -1,0 +1,124 @@
+"0","knitr::opts_chunk$set(echo = TRUE, cache = FALSE)"
+"0","library(dplyr)"
+"2","Registered S3 method overwritten by 'dplyr':
+  method           from
+  print.rowwise_df     
+"
+"2","
+Do³¹czanie pakietu: ‘dplyr’
+
+"
+"2","Nastêpuj¹ce obiekty zosta³y zakryte z ‘package:stats’:
+
+    filter, lag
+
+"
+"2","Nastêpuj¹ce obiekty zosta³y zakryte z ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+"
+"0","library(DT)"
+"2","Registered S3 methods overwritten by 'htmltools':
+  method               from         
+  print.html           tools:rstudio
+  print.shiny.tag      tools:rstudio
+  print.shiny.tag.list tools:rstudio
+"
+"2","Registered S3 method overwritten by 'htmlwidgets':
+  method           from         
+  print.htmlwidget tools:rstudio
+"
+"0","library(mice)"
+"2","£adowanie wymaganego pakietu: lattice
+"
+"2","
+Do³¹czanie pakietu: ‘mice’
+
+"
+"2","Nastêpuj¹ce obiekty zosta³y zakryte z ‘package:base’:
+
+    cbind, rbind
+
+"
+"0","library(finalfit)"
+"2","Registered S3 method overwritten by 'data.table':
+  method           from
+  print.data.table     
+"
+"0","library(imputeTS)"
+"2","Registered S3 method overwritten by 'xts':
+  method     from
+  as.zoo.xts zoo 
+"
+"2","Registered S3 method overwritten by 'quantmod':
+  method            from
+  as.zoo.data.frame zoo 
+"
+"2","Registered S3 methods overwritten by 'forecast':
+  method             from    
+  fitted.fracdiff    fracdiff
+  residuals.fracdiff fracdiff
+"
+"0","library(Hmisc)"
+"2","£adowanie wymaganego pakietu: survival
+"
+"2","£adowanie wymaganego pakietu: Formula
+"
+"2","£adowanie wymaganego pakietu: ggplot2
+"
+"2","
+Do³¹czanie pakietu: ‘Hmisc’
+
+"
+"2","Nastêpuj¹ce obiekty zosta³y zakryte z ‘package:dplyr’:
+
+    src, summarize
+
+"
+"2","Nastêpuj¹ce obiekty zosta³y zakryte z ‘package:base’:
+
+    format.pval, units
+
+"
+"0","library(reshape)"
+"2","
+Do³¹czanie pakietu: ‘reshape’
+
+"
+"2","Nastêpuj¹cy obiekt zosta³ zakryty z ‘package:dplyr’:
+
+    rename
+
+"
+"0","library(ggplot2)"
+"0","library(plotly)"
+"2","
+Do³¹czanie pakietu: ‘plotly’
+
+"
+"2","Nastêpuj¹cy obiekt zosta³ zakryty z ‘package:reshape’:
+
+    rename
+
+"
+"2","Nastêpuj¹cy obiekt zosta³ zakryty z ‘package:Hmisc’:
+
+    subplot
+
+"
+"2","Nastêpuj¹cy obiekt zosta³ zakryty z ‘package:ggplot2’:
+
+    last_plot
+
+"
+"2","Nastêpuj¹cy obiekt zosta³ zakryty z ‘package:stats’:
+
+    filter
+
+"
+"2","Nastêpuj¹cy obiekt zosta³ zakryty z ‘package:graphics’:
+
+    layout
+
+"
